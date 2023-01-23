@@ -8,7 +8,7 @@ This repository contains the code and data accompanying the paper [Shape-Guided 
 This code was tested with Python 3.8, Pytorch 1.12 using a pretrained [Stable Diffusion](https://huggingface.co/runwayml/stable-diffusion-v1-5) from [Hugging Face / Diffusers](https://huggingface.co/docs/diffusers/index). To install the additional required packages, please refer to `requirements.txt`.
 
 ## Getting Started
-To get started, we recommend running the notebook: [**shape-guided-diffusion**](). The notebook contains examples of using our method for diverse applications including mask-based inside editing, outside editing, or both. 
+To get started, we recommend running the notebook: [**shape-guided-diffusion**](shape_guided_diffusion.ipynb). The notebook contains examples of using our method for diverse applications including mask-based inside editing, outside editing, or both. 
 
 ## MS-COCO ShapePrompts
 We also provide our MS-COCO ShapePrompts benchmark in the same json format as MS-COCO 2017 instance segmentations (i.e. object masks). Each json file contains a subset of the MS-COCO source file where the object area is between [2%, 50%] of the image area. For overall statistics, please refer to the table below:
