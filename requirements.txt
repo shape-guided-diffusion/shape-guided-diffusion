@@ -1,5 +1,0 @@
-jupyterlab
-transformers
-diffusers
-pycocotools
-accelerate
