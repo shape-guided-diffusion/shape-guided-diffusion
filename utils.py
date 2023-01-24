@@ -1,18 +1,15 @@
-import torch
+from difflib import SequenceMatcher
+import math
 import numpy as np
 import PIL
 from PIL import Image
-from difflib import SequenceMatcher
-import math
-
+import torch
 
 def exponential_schedule(current_over_max, gamma=0.95, multiplier=50):
     return gamma ** (current_over_max * multiplier)
 
-
 def cosine_schedule(current_over_max):
     return (1 + math.cos(current_over_max * math.pi)) / 2
-
 
 def slerp(z1, z2, alpha):
     theta = torch.acos(torch.sum(z1 * z2) / (torch.norm(z1) * torch.norm(z2)))
@@ -20,7 +17,6 @@ def slerp(z1, z2, alpha):
             torch.sin((1 - alpha) * theta) / torch.sin(theta) * z1
             + torch.sin(alpha * theta) / torch.sin(theta) * z2
     )
-
 
 def init_attention_func(unet,
                         inside_indices, outside_indices, pad_indices,
@@ -171,13 +167,11 @@ def init_attention_func(unet,
                 module.self_attn_scale = 1
                 module.self_attn_schedule = None
 
-
 def save_attention(unet, save_attn_name=None):
     for name, module in unet.named_modules():
         module_name = type(module).__name__
         if module_name == "CrossAttention":
             module.save_attn_name = save_attn_name
-
 
 def save_mask_image(unet, mask=None):
     for name, module in unet.named_modules():
@@ -185,20 +179,17 @@ def save_mask_image(unet, mask=None):
         if module_name == "CrossAttention":
             module.mask_image = mask
 
-
 def use_mask_tokens_attention(unet, mask=True):
     for name, module in unet.named_modules():
         module_name = type(module).__name__
         if module_name == "CrossAttention" and "attn2" in name:
             module.mask_tokens_attn = mask
 
-
 def use_mask_self_attention(unet, mask=True):
     for name, module in unet.named_modules():
         module_name = type(module).__name__
         if module_name == "CrossAttention" and "attn1" in name:
             module.mask_self_attn = mask
-
 
 def set_timestep(unet, timestep=None):
     for name, module in unet.named_modules():
@@ -220,7 +211,6 @@ def get_tokens_embedding(clip_tokenizer, clip, device, prompt):
     embedding = clip(input_ids).last_hidden_state
     return tokens, embedding
 
-
 def display_prompt_tokens(clip_tokenizer, prompt):
     tokens = clip_tokenizer(
         prompt,
@@ -238,7 +228,6 @@ def display_prompt_tokens(clip_tokenizer, prompt):
             break
         else:
             print(idx, "->", decoded_token)
-
 
 def inversion(x, model, scheduler, **kwargs):
     seq = scheduler.timesteps
@@ -298,19 +287,16 @@ def inversion(x, model, scheduler, **kwargs):
 
     return xs, x0_preds
 
-
 def postprocess(image):
     image = (image / 2 + 0.5).clamp(0, 1)
     image = image.cpu().permute(0, 2, 3, 1).numpy()
     image = (image[0] * 255).round().astype("uint8")
     return Image.fromarray(image)
 
-
 def apply_mask(image, mask_image):
     image = np.array(image)
     mask_image = np.array(mask_image)[:, :, None] / 255
     return Image.fromarray((image * mask_image).astype(np.uint8))
-
 
 def noise_to_latent(latent, noise_pred, at, eta, at_next):
     x0_t = (latent - noise_pred * (1 - at).sqrt()) / at.sqrt()
@@ -330,7 +316,6 @@ def latent_to_image(vae, latent):
     image = vae.decode(latent.to(vae.dtype)).sample
     image = postprocess(image)
     return image
-
 
 def compute_fixed_indices(tokens_inversion, tokens, num_tokens=38):
     first_pad = tokens["attention_mask"].sum().item() - 1

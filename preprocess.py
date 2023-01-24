@@ -1,9 +1,8 @@
 import numpy as np
-import torch
-from torch import autocast
 import PIL
 from PIL import Image
 from pycocotools import mask
+import torch
 
 def preprocess_image(image, mult=64, w=512, h=512):
   image = image.resize((w, h), resample=PIL.Image.LANCZOS)
@@ -47,7 +46,7 @@ def get_segm_image(segmentations, image_to_file, segm_idx, image_idx):
   return segm, image
 
 def get_text_embeddings(prompt, pipe, return_input_ids=False):
-  with autocast("cuda"):
+  with torch.autocast("cuda"):
     with torch.no_grad():
       text_input = pipe.tokenizer(
         prompt,

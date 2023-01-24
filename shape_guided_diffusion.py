@@ -1,19 +1,6 @@
-import numpy as np
-from PIL import Image
-from tqdm.auto import tqdm
-
-import math
-import PIL
-
+from diffusers import DDIMScheduler
 import torch
-
-from transformers import CLIPModel, CLIPTextModel, CLIPTokenizer
-from diffusers import (
-    AutoencoderKL, UNet2DConditionModel, DDIMScheduler
-)
-from difflib import SequenceMatcher
-
-import sys
+from tqdm import tqdm
 from preprocess import preprocess_image, preprocess_segm, get_segm_image
 from utils import (
     save_mask_image,
@@ -29,7 +16,6 @@ from utils import (
     slerp,
     compute_fixed_indices
 )
-
 
 @torch.no_grad()
 def shape_guided_diffusion(
