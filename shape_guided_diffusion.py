@@ -1,4 +1,9 @@
-from diffusers import DDIMScheduler
+from diffusers import (
+    AutoencoderKL, UNet2DConditionModel, DDIMScheduler
+)
+from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
+from transformers import CLIPModel, CLIPTextModel, CLIPTokenizer, CLIPFeatureExtractor
+
 import torch
 from tqdm import tqdm
 from preprocess import preprocess_image, preprocess_segm, get_segm_image
@@ -23,35 +28,51 @@ def shape_guided_diffusion(
         vae,
         clip_tokenizer,
         clip,
-        prompt_inside_indices,
-        prompt_outside_indices,
-        prompt_pad_indices,
+        init_image=None,
+        mask_image=None,
+        invert_mask=False,
+        # Prompt params
         prompt_inside=None,
         prompt_outside=None,
         prompt_inversion_inside=None,
         prompt_inversion_outside=None,
         num_inside=38,
         num_outside=38,
-        guidance_scale=7.5,
+        # Generation params
+        guidance_scale=3.5,
         steps=50,
+        copy_background=True,
+        # Inside-Outside Attention params
+        run_cross_attention_mask=True,
+        run_self_attention_mask=True,
+        self_attn_schedule=1.0,
+        cross_attn_schedule=2.5,
+        # DDIM Inversion params
+        run_inversion=True,
+        eta=0.0,
+        noise_mixing=0.0,
+        # Random seed params
         generator=None,
+        noise=None,
+        # Misc params
         width=512,
         height=512,
-        init_image=None,
         init_image_strength=1.0,
-        eta=0.0,
-        mask=None,
-        mask_image=None,
-        run_inversion=False,
-        run_cross_attention_mask=False,
-        run_self_attention_mask=False,
-        save_attention_names=[],
-        noise=None,
-        noise_mixing=0.0,
-        self_attn_schedule=None,
-        cross_attn_schedule=None,
+        save_attention_names=[]
 ):
     device = unet.device
+    init_image = preprocess_image(init_image)
+    init_image = init_image.to(device)
+    mask = preprocess_segm(mask_image)
+    mask = mask.to(device)
+
+    if invert_mask:
+        mask = 1.0 - mask
+
+    prompt_inside_indices = torch.tensor([i for i in range(1, num_inside + 1)])
+    prompt_outside_indices = torch.tensor([i for i in range(num_inside + 1, num_inside + num_outside + 1)])
+    prompt_pad_indices = torch.tensor([0] + [i for i in range(num_inside + num_outside + 1, 77)])
+
     scheduler = DDIMScheduler(
         beta_start=0.00085,
         beta_end=0.012,
@@ -186,7 +207,7 @@ def shape_guided_diffusion(
 
         prompt_latent = noise_to_latent(prompt_latent, prompt_noise_pred, at, eta, at_next)
 
-        if mask is not None:
+        if copy_background:
             if run_inversion:
                 init_latent_mask = xts[-t_index - 1].to(device)
             else:
@@ -197,3 +218,55 @@ def shape_guided_diffusion(
     prompt_image = latent_to_image(vae, prompt_latent)
 
     return prompt_image
+
+def init_models(
+    huggingface_access_token,
+    torch_dtype = torch.float16,
+    device = "cuda",
+    model_precision_type = "fp16",
+    model_path_clip = "openai/clip-vit-large-patch14",
+    model_path_diffusion = "runwayml/stable-diffusion-v1-5"
+):
+    clip_tokenizer = CLIPTokenizer.from_pretrained(model_path_clip)
+    clip_model = CLIPModel.from_pretrained(
+        model_path_clip,
+        torch_dtype=torch_dtype
+    )
+    clip = clip_model.text_model
+    unet = UNet2DConditionModel.from_pretrained(
+        model_path_diffusion,
+        subfolder="unet",
+        use_auth_token=huggingface_access_token,
+        revision=model_precision_type,
+        torch_dtype=torch.float16
+    )
+    vae = AutoencoderKL.from_pretrained(
+        model_path_diffusion,
+        subfolder="vae",
+        use_auth_token=huggingface_access_token,
+        revision=model_precision_type,
+        torch_dtype=torch.float16
+    )
+    unet.to(device)
+    vae.to(device)
+    clip.to(device)
+    return unet, vae, clip, clip_tokenizer
+
+def init_safety_checker(
+    device = "cuda",
+    model_path_clip = "openai/clip-vit-large-patch14",
+    model_path_safety="CompVis/stable-diffusion-safety-checker"
+):
+    feature_extractor = CLIPFeatureExtractor.from_pretrained(model_path_clip)
+    safety_checker = StableDiffusionSafetyChecker.from_pretrained(model_path_safety)
+    safety_checker.to(device)
+    return feature_extractor, safety_checker
+
+def check_image(feature_extractor, safety_checker, image):
+    safety_checker_input = feature_extractor(image, return_tensors="pt")
+    safety_checker_input = safety_checker_input.to(safety_checker.device)
+    image, has_nsfw_concept = safety_checker(
+        images=image, 
+        clip_input=safety_checker_input.pixel_values
+    )
+    return image, has_nsfw_concept[0]
