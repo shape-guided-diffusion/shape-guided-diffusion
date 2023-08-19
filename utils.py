@@ -38,15 +38,19 @@ def init_attention_func(unet,
 
         if self.mask_image is not None:
             image_dim = int(math.sqrt(query.shape[1]))
-            segm = self.preprocess_segm(
-                self.mask_image,
-                batch_size=batch_size_attention,
-                num_channels=1,
-                w=image_dim,
-                h=image_dim
-            ).to(query.device)
-            segm = segm.view(batch_size_attention, 1, -1)
-            segm = segm.permute((0, 2, 1))
+            if image_dim in self.mask_image_cache:
+                segm = self.mask_image_cache[image_dim]
+            else:
+                segm = self.preprocess_segm(
+                    self.mask_image,
+                    batch_size=batch_size_attention,
+                    num_channels=1,
+                    w=image_dim,
+                    h=image_dim
+                ).to(query.device)
+                segm = segm.view(batch_size_attention, 1, -1)
+                segm = segm.permute((0, 2, 1))
+                self.mask_image_cache[image_dim] = segm
 
         if dim is None:
             dim = query.shape[2] * self.heads
@@ -66,6 +70,14 @@ def init_attention_func(unet,
                     torch.einsum("b i d, b j d -> b i j", query[start_idx:end_idx], key[start_idx:end_idx]) * self.scale
             )
             attn_slice = attn_slice.softmax(dim=-1)
+            # precompute some masks, since multiplication is slightly faster than indexing
+            if self.mask_tokens_attn or self.is_token_attn:
+                if inside_fixed_indices is not None:
+                    inside_fixed_mask = torch.zeros((1, 1, attn_slice.shape[-1]), dtype=attn_slice.dtype, device=attn_slice.device)
+                    inside_fixed_mask[:, :, inside_fixed_indices] = 1
+                if outside_fixed_indices is not None:
+                    outside_fixed_mask = torch.zeros((1, 1, attn_slice.shape[-1]), dtype=attn_slice.dtype, device=attn_slice.device)
+                    outside_fixed_mask[:, :, outside_fixed_indices] = 1
 
             if self.use_last_attn_slice:
                 if self.last_attn_slice_mask is not None:
@@ -82,9 +94,9 @@ def init_attention_func(unet,
             if not self.mask_tokens_attn and self.is_token_attn:
                 attn_slice *= cross_attn_schedule
                 if inside_fixed_indices is not None:
-                    attn_slice[:, :, inside_fixed_indices] /= cross_attn_schedule
+                    attn_slice *= (inside_fixed_mask / cross_attn_schedule + 1 - inside_fixed_mask)
                 if outside_fixed_indices is not None:
-                    attn_slice[:, :, outside_fixed_indices] /= cross_attn_schedule
+                    attn_slice *= (outside_fixed_mask / cross_attn_schedule + 1 - outside_fixed_mask)
 
             if self.mask_image is not None and self.mask_tokens_attn:
 
@@ -100,19 +112,18 @@ def init_attention_func(unet,
                 attn_slice[:, :, outside_indices] = outside_slice * outside_scale
 
                 if inside_fixed_indices is not None:
-                    attn_slice[:, :, inside_fixed_indices] /= inside_scale
+                    attn_slice *= (inside_fixed_mask / inside_scale + 1 - inside_fixed_mask)
 
                 if outside_fixed_indices is not None:
-                    attn_slice[:, :, outside_fixed_indices] /= outside_scale
+                    attn_slice *= (outside_fixed_mask / outside_scale + 1 - outside_fixed_mask)
 
                 attn_slice[:, :, pad_indices] = 0
                 self.mask_tokens_attn = False
 
             if self.mask_image is not None and self.mask_self_attn:
-                _, mask_inside_indices, _ = (1 - segm).nonzero(as_tuple=True)
-                _, mask_outside_indices, _ = segm.nonzero(as_tuple=True)
-                insideout_mask = torch.ones_like(attn_slice) * (1 - segm)
-                insideout_mask[:, :, mask_outside_indices] = segm
+                insideout_mask = (1 - segm[0]).expand(-1, attn_slice.shape[-1]).clone()
+                insideout_mask[:, segm.squeeze(2)[0] > 0] = segm[0]
+                insideout_mask = insideout_mask.expand_as(attn_slice)
 
                 if self_attn_schedule is not None and type(self_attn_schedule) is not str:
                     self_attn_scale = self_attn_schedule
@@ -162,6 +173,7 @@ def init_attention_func(unet,
                 module.attn_name_slice = {}
                 module.save_attn_name = None
                 module.mask_image = None
+                module.mask_image_cache = {}
                 module.mask_tokens_attn = False
                 module.mask_self_attn = False
                 module.self_attn_scale = 1
